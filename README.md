@@ -44,3 +44,4 @@ Contributions and feedback are welcome! This project is in a preliminary explora
 ## License
 
 See `COPYING` for license information.
+The layout of the project is based on the [nf-hello](https://github.com/nextflow-io/nf-hello.git) project, licensed under the Apache License 2.0.
