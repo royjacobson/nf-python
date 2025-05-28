@@ -13,6 +13,9 @@ import nextflow.plugin.extension.Function
 import nextflow.plugin.extension.Operator
 import nextflow.plugin.extension.PluginExtensionPoint
 import nextflow.Session
+import nextflow.util.MemoryUnit
+import nextflow.util.VersionNumber
+import nextflow.util.Duration
 
 @CompileStatic
 class PythonExtension extends PluginExtensionPoint {
@@ -31,8 +34,8 @@ class PythonExtension extends PluginExtensionPoint {
         final target = CH.createBy(source)
         final next = { args ->
             def inputMap = [
-                args: args,
-                opts: forwardedOpts
+                args: packGroovy(args instanceof Map ? args : [value: args]),
+                opts: packGroovy(forwardedOpts)
             ]
             def infile = File.createTempFile('nfpy_in', '.json')
             infile.deleteOnExit()
@@ -45,8 +48,8 @@ class PythonExtension extends PluginExtensionPoint {
             ] as String[]
             def env = [
                 'NEXTFLOW_INFILE': infile.absolutePath,
-                'NEXTFLOW_OUTFILE': outfile.absolutePath
-                'NEXTFLOW_PYTHON_COMPAT_VER': '1'
+                'NEXTFLOW_OUTFILE': outfile.absolutePath,
+                'NEXTFLOW_PYTHON_COMPAT_VER': '1',
             ]
             def pb = new ProcessBuilder(proc)
             pb.environment().putAll(env)
@@ -57,10 +60,73 @@ class PythonExtension extends PluginExtensionPoint {
             if (rc != 0) throw new RuntimeException("Python script failed: $script")
 
             def result = new JsonSlurper().parse(outfile)
-            target.bind(result)
+            def unpacked = unpackPython(result)
+            target.bind(unpacked)
         }
         final done = { target.bind(Channel.STOP) }
         DataflowHelper.subscribeImpl(source, [onNext: next, onComplete: done])
         return target
+    }
+
+    // Helper: packGroovy serializes Groovy/Java types to the plugin protocol
+    static def packGroovy(obj) {
+        if (obj == null) return ["Null", null]
+        if (obj instanceof List) return ["List", obj.collect { packGroovy(it) }]
+        if (obj instanceof Set) return ["Set", obj.collect { packGroovy(it) }]
+        if (obj instanceof Map) return ["Map", obj.collect { k, v -> [packGroovy(k), packGroovy(v)] }.toList()]
+        if (obj instanceof String) return ["String", obj]
+        if (obj instanceof Integer) return ["Integer", obj]
+        if (obj instanceof Long) return ["Integer", obj]
+        if (obj instanceof Double || obj instanceof Float) return ["Float", obj]
+        if (obj instanceof Boolean) return ["Boolean", obj]
+        if (obj instanceof java.nio.file.Path) return ["Path", obj.toString()]
+        if (obj instanceof Duration) return ["Duration", obj.toMillis()]
+        if (obj instanceof MemoryUnit) return ["MemoryUnit", obj.toBytes()]
+        if (obj instanceof VersionNumber) return ["VersionNumber", [obj.getMajor(), obj.getMinor(), obj.getPatch()]]
+        // Add more as needed
+        throw new IllegalArgumentException("Cannot serialize type: ${obj?.getClass()}")
+    }
+    // Helper: unpackPython deserializes plugin protocol to Groovy/Java types
+    static def unpackPython(obj) {
+        if (!(obj instanceof List)) return obj
+        List objList = (List)obj
+        if (objList.size() != 2) return obj
+        def type = objList.get(0)
+        def data = objList.get(1)
+        switch(type) {
+            case 'List': return data instanceof List ? data.collect { unpackPython(it) } : []
+            case 'Set': return data instanceof List ? (data.collect { unpackPython(it) } as Set) : [] as Set
+            case 'Map':
+                if (data instanceof List) {
+                    def result = [:]
+                    for (def entry : data) {
+                        if (entry instanceof List && entry.size() == 2) {
+                            result[unpackPython(entry[0])] = unpackPython(entry[1])
+                        }
+                    }
+                    return result
+                } else {
+                    return [:]
+                }
+            case 'String': return data
+            case 'Integer': return data
+            case 'Float': return data
+            case 'Boolean': return data
+            case 'Null': return null
+            case 'Path': return data instanceof String ? java.nio.file.Paths.get(data) : null
+            case 'Duration': return data != null ? Duration.of(data as long) : null
+            case 'MemoryUnit':
+                return data != null ? new MemoryUnit(data as long) : null
+            case 'VersionNumber':
+                if (data instanceof List && data.size() == 3) {
+                    // Compose a string like 'major.minor.patch' for the constructor
+                    def verStr = "${data[0]}.${data[1]}.${data[2]}"
+                    return new VersionNumber(verStr)
+                } else {
+                    return null
+                }
+            // Add more as needed
+            default: throw new IllegalArgumentException("Unknown type from Python: $type")
+        }
     }
 }
