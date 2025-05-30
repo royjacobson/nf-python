@@ -7,11 +7,13 @@
 ## Example Usage
 
 ```groovy
-include { pythonScript } from 'plugin/nf-python'
+include { pyOperator; pFunction } from 'plugin/nf-python'
 
 Channel.of(1, 2, 3)
-    .pythonScript(script: 'my_python_script.py', foo: 'bar')
+    .pyOperator(script: 'my_python_script.py', foo: 'bar')
     .view()
+
+pyFunction('my_other_script.py', bar: 'too')
 ```
 
 - Channel data is passed as `nextflow.args` in Python.

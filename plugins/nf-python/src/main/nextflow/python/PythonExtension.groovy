@@ -26,46 +26,54 @@ class PythonExtension extends PluginExtensionPoint {
         this.session = session
     }
 
-    @Operator
-    DataflowWriteChannel pythonScript(DataflowReadChannel source, Map opts) {
+    // Shared logic for running a Python script
+    private static def runPythonScript(Map opts, def argsForChannel = null) {
         def script = opts.script
         if (!script) throw new IllegalArgumentException('Missing script argument')
         def forwardedOpts = opts.findAll { k, v -> k != 'script' }
+        def inputMap = [
+            args: packGroovy(argsForChannel != null ? argsForChannel : [:]),
+            opts: packGroovy(forwardedOpts)
+        ]
+        def infile = File.createTempFile('nfpy_in', '.json')
+        infile.deleteOnExit()
+        infile.text = JsonOutput.toJson(inputMap)
+        def outfile = File.createTempFile('nfpy_out', '.json')
+        outfile.deleteOnExit()
+
+        def proc = ['python', script] as String[]
+        def env = [
+            'NEXTFLOW_INFILE': infile.absolutePath,
+            'NEXTFLOW_OUTFILE': outfile.absolutePath,
+            'NEXTFLOW_PYTHON_COMPAT_VER': '1',
+        ]
+        def pb = new ProcessBuilder(proc)
+        pb.environment().putAll(env)
+        pb.redirectErrorStream(true)
+        def process = pb.start()
+        process.inputStream.eachLine { println "[python] $it" }
+        int rc = process.waitFor()
+        if (rc != 0) throw new RuntimeException("Python script failed: $script")
+
+        def result = new JsonSlurper().parse(outfile)
+        return unpackPython(result)
+    }
+
+    @Operator
+    DataflowWriteChannel pyOperator(DataflowReadChannel source, Map opts) {
         final target = CH.createBy(source)
         final next = { args ->
-            def inputMap = [
-                args: packGroovy(args instanceof Map ? args : [value: args]),
-                opts: packGroovy(forwardedOpts)
-            ]
-            def infile = File.createTempFile('nfpy_in', '.json')
-            infile.deleteOnExit()
-            infile.text = JsonOutput.toJson(inputMap)
-            def outfile = File.createTempFile('nfpy_out', '.json')
-            outfile.deleteOnExit()
-
-            def proc = [
-                'python', script
-            ] as String[]
-            def env = [
-                'NEXTFLOW_INFILE': infile.absolutePath,
-                'NEXTFLOW_OUTFILE': outfile.absolutePath,
-                'NEXTFLOW_PYTHON_COMPAT_VER': '1',
-            ]
-            def pb = new ProcessBuilder(proc)
-            pb.environment().putAll(env)
-            pb.redirectErrorStream(true)
-            def process = pb.start()
-            process.inputStream.eachLine { println "[python] $it" }
-            int rc = process.waitFor()
-            if (rc != 0) throw new RuntimeException("Python script failed: $script")
-
-            def result = new JsonSlurper().parse(outfile)
-            def unpacked = unpackPython(result)
+            def unpacked = runPythonScript(opts, args instanceof Map ? args : [value: args])
             target.bind(unpacked)
         }
         final done = { target.bind(Channel.STOP) }
         DataflowHelper.subscribeImpl(source, [onNext: next, onComplete: done])
         return target
+    }
+
+    @Function
+    def pyFunction(Map opts) {
+        return runPythonScript(opts)
     }
 
     // Helper: packGroovy serializes Groovy/Java types to the plugin protocol
