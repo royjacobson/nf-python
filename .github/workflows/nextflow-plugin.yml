@@ -1,0 +1,44 @@
+name: Nextflow Plugin & Python Package CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NF_PYTHON_VERSION: '0.0.1'
+      NXF_OFFLINE: 'true'
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    - name: Install Nextflow
+      run: |
+        wget -qO- https://get.nextflow.io | bash
+        sudo mv nextflow /usr/local/bin/
+        nextflow -version
+    - name: Build Python package
+      run: |
+        pip install --upgrade pip
+        pip install ./py
+    - name: Build Nextflow plugin
+      run: make buildPlugins
+    - name: Move plugin to ~/.nextflow/plugins
+      run: |
+        mkdir -p ~/.nextflow/plugins
+        cp -r build/plugins/nf-python-${{ env.NF_PYTHON_VERSION }} ~/.nextflow/plugins/
+    - name: Run Nextflow workflow test
+      run: |
+        cd test
+        nextflow run test_flow.nf -plugins "nf-python@${{ env.NF_PYTHON_VERSION }}"

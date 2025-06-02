@@ -1,14 +1,5 @@
-"""
-Python integration module for Nextflow plugin (nf-python).
-
-This module exposes input arguments and output assignment for Python scripts
-executed via the Nextflow plugin. Arguments and outputs are passed via JSON files,
-with file paths provided by environment variables.
-
-Environment variables:
-- NEXTFLOW_INFILE: path to JSON file containing input arguments
-- NEXTFLOW_OUTFILE: path to JSON file where output should be written
-"""
+# (Moved from plugins/nf-python/src/main/python/nextflow.py)
+# Python integration module for Nextflow plugin (nf-python).
 
 import os
 import json
@@ -16,45 +7,35 @@ import sys
 import pathlib
 import datetime
 
-
 class MemoryUnit:
     UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB"]
-
     def __init__(self, size):
         if isinstance(size, int):
             self.size = size
         elif isinstance(size, str):
             raise NotImplementedError()
-
     @property
     def bytes(self):
         return self.size
-
     @property
     def kilo(self):
         return self.size >> 10
-
     @property
     def mega(self):
         return self.size >> 20
-
     @property
     def giga(self):
         return self.size >> 30
-
 
 class VersionNumber:
     def __init__(self, major, minor, patch):
         self.major = major
         self.minor = minor
         self.patch = patch
-
     def matches(self):
         raise NotImplementedError()
 
-
 NEXTFLOW_PYTHON_COMPAT_VER = "1"
-
 
 def parse_nf(serialized_object):
     nf_type, data = serialized_object
@@ -65,7 +46,6 @@ def parse_nf(serialized_object):
         else:
             return set(container_data)
     elif nf_type == "Map":
-        # data is a list of [key, value] pairs, both type-tagged
         return {parse_nf(k): parse_nf(v) for k, v in data}
     elif nf_type == "Duration":
         return datetime.timedelta(milliseconds=data)
@@ -87,7 +67,6 @@ def parse_nf(serialized_object):
         return None
     else:
         raise ValueError(f"Unknown type {nf_type}")
-
 
 def pack_python(python_object):
     if isinstance(python_object, (list, tuple)):
@@ -123,7 +102,6 @@ def pack_python(python_object):
     else:
         raise TypeError(f"Cannot serialize object of type {type(python_object)}")
 
-
 class Nextflow:
     def __init__(self):
         self._written_output = False
@@ -132,7 +110,6 @@ class Nextflow:
                 "Incompatible NEXTFLOW_PYTHON_COMPAT_VER. Expected '1', got "
                 f"{os.environ.get('NEXTFLOW_PYTHON_COMPAT_VER')}"
             )
-
         self._infile = os.environ.get("NEXTFLOW_INFILE")
         self._outfile = os.environ.get("NEXTFLOW_OUTFILE")
         if not self._infile or not self._outfile:
@@ -140,7 +117,6 @@ class Nextflow:
                 "NEXTFLOW_INFILE and NEXTFLOW_OUTFILE env vars must be set."
             )
         self._args, self._opts = self._load_args_and_opts()
-
     def _load_args_and_opts(self):
         try:
             with open(self._infile, "r") as f:
@@ -153,19 +129,15 @@ class Nextflow:
         except Exception as e:
             print(f"[nextflow.py] Failed to load input arguments: {e}", file=sys.stderr)
             return None, None
-
     def __del__(self):
         if not self._written_output:
             raise RuntimeWarning("Output not written before script exit.")
-
     @property
     def args(self):
         return self._args
-
     @property
     def opts(self):
         return self._opts
-
     def output(self, *args, **kwargs):
         if args and kwargs:
             raise ValueError("Cant pass both unnamed outputs and named outputs!")
@@ -176,7 +148,6 @@ class Nextflow:
             with open(self._outfile, "w") as f:
                 json.dump(pack_python(kwargs), f, default=str)
         self._written_output = True
-
 
 nextflow = Nextflow()
 
