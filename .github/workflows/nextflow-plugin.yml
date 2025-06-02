@@ -33,7 +33,8 @@ jobs:
         pip install --upgrade pip
         pip install ./py
     - name: Build Nextflow plugin
-      run: make buildPlugins
+      run: |
+        ./gradlew assemble
     - name: Move plugin to ~/.nextflow/plugins
       run: |
         mkdir -p ~/.nextflow/plugins
