@@ -85,10 +85,12 @@ class PythonExtension extends PluginExtensionPoint {
         if (obj instanceof String) return ["String", obj]
         if (obj instanceof Integer) return ["Integer", obj]
         if (obj instanceof Long) return ["Integer", obj]
+        if (obj instanceof BigDecimal) return ["Decimal", obj]
         if (obj instanceof Double || obj instanceof Float) return ["Float", obj]
         if (obj instanceof Boolean) return ["Boolean", obj]
         if (obj instanceof java.nio.file.Path) return ["Path", obj.toString()]
         if (obj instanceof Duration) return ["Duration", obj.toMillis()]
+        if (obj instanceof java.time.Duration) return ["Duration", obj.toMillis()]
         if (obj instanceof MemoryUnit) return ["MemoryUnit", obj.toBytes()]
         if (obj instanceof VersionNumber) return ["VersionNumber", [obj.getMajor(), obj.getMinor(), obj.getPatch()]]
         // Add more as needed
@@ -118,6 +120,7 @@ class PythonExtension extends PluginExtensionPoint {
                 }
             case 'String': return data
             case 'Integer': return data
+            case 'Decimal': return data instanceof String ? new BigDecimal(data as String) : null
             case 'Float': return data
             case 'Boolean': return data
             case 'Null': return null

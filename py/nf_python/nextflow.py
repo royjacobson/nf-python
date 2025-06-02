@@ -6,6 +6,7 @@ import json
 import sys
 import pathlib
 import datetime
+import decimal
 
 class MemoryUnit:
     UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB"]
@@ -59,6 +60,8 @@ def parse_nf(serialized_object):
         return data
     elif nf_type == "Integer":
         return int(data)
+    elif nf_type == "Decimal":
+        return decimal.Decimal(data)
     elif nf_type == "Float":
         return data
     elif nf_type == "Boolean":
@@ -82,6 +85,8 @@ def pack_python(python_object):
         return ["String", python_object]
     elif isinstance(python_object, int):
         return ["Integer", python_object]
+    elif isinstance(python_object, decimal.Decimal):
+        return ["Decimal", str(python_object)]
     elif isinstance(python_object, float):
         return ["Float", python_object]
     elif isinstance(python_object, bool):
