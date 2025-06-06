@@ -50,7 +50,7 @@ jobs:
       - name: Archive Python dist
         uses: actions/upload-artifact@v4
         with:
-          name: nf-python-pypi
+          name: python-package-distributions
           path: py/dist/*
 
   publish-pypi:
@@ -58,22 +58,15 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi-publish
-      url: https://pypi.org/project/nf-python-plugin/
+      url: https://pypi.org/p/nf-python-plugin/
     permissions:
-      id-token: write  # Required for trusted publishing
+      id-token: write
+    
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-      - name: Build Python package
-        run: |
-          cd py
-          pip install build
-          python -m build
-      - name: Publish to PyPI (trusted publishing)
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          # No password needed for trusted publishing
-          verbose: true
+    - name: Download all the dists
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+    - name: Publish distribution 📦 to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
