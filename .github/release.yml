@@ -1,0 +1,97 @@
+# CI pipeline for nf-python
+
+name: nf-python Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Build Nextflow plugin
+        run: |
+          make buildPlugins
+      - name: Archive plugin zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: nf-python-plugin
+          path: build/plugins/nf-python-*.zip
+
+  build-pypi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: Build Python package
+        run: |
+          cd py
+          pip install build
+          python -m build
+      - name: Archive Python dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: nf-python-pypi
+          path: py/dist/*
+
+  publish-pypi:
+    needs: build-pypi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: Build Python package
+        run: |
+          cd py
+          pip install build
+          python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+  validate-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract version from MANIFEST.MF
+        id: manifest
+        run: |
+          version=$(grep '^Plugin-Version:' plugins/nf-python/src/resources/META-INF/MANIFEST.MF | awk '{print $2}')
+          echo "version=$version" >> $GITHUB_OUTPUT
+      - name: Extract version from pyproject.toml
+        id: pyproject
+        run: |
+          version=$(grep '^version' py/pyproject.toml | head -1 | cut -d '"' -f2)
+          echo "version=$version" >> $GITHUB_OUTPUT
+      - name: Extract version from git tag
+        id: tag
+        run: |
+          tag_version=${GITHUB_REF##*/}
+          tag_version=${tag_version#v}
+          echo "version=$tag_version" >> $GITHUB_OUTPUT
+      - name: Check versions match
+        run: |
+          if [ "${{ steps.manifest.outputs.version }}" != "${{ steps.pyproject.outputs.version }}" ]; then
+            echo "MANIFEST.MF and pyproject.toml versions do not match!"
+            exit 1
+          fi
+          if [ "${{ steps.manifest.outputs.version }}" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "MANIFEST.MF version and git tag do not match!"
+            exit 1
+          fi
+          echo "All versions match: ${{ steps.manifest.outputs.version }}"
