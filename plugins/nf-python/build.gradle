@@ -44,9 +44,6 @@ sourceSets {
     main.java.srcDirs = []
     main.groovy.srcDirs = ['src/main']
     main.resources.srcDirs = ['src/resources']
-    test.groovy.srcDirs = ['src/test']
-    test.java.srcDirs = []
-    test.resources.srcDirs = ['src/testResources']
 }
 
 ext{

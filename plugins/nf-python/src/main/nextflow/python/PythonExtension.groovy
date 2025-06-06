@@ -20,7 +20,7 @@ import nextflow.util.Duration
 @CompileStatic
 class PythonExtension extends PluginExtensionPoint {
     private Session session
-    
+
     @Override
     void init(Session session) {
         this.session = session
@@ -59,8 +59,52 @@ class PythonExtension extends PluginExtensionPoint {
         return unpackPython(result)
     }
 
+    private static String normalize_indentation(String code) {
+        def lines = code.split('\n')
+        def first_non_empty = lines.find { it.trim() }
+        // Get a string of spaces/tabs that represents the base indentation
+        def base_indentation = first_non_empty ? first_non_empty.takeWhile { it == ' ' || it == '\t' } : ''
+        // Remove the base indentation from all lines
+        def normalized_lines = lines.collect { line ->
+            if (line.startsWith(base_indentation)) {
+                return line.substring(base_indentation.length())
+            } else {
+                return line // No change if it doesn't start with base indentation
+            }
+        }
+        // Join the lines back together
+        return normalized_lines.join('\n')
+    }
+
+    private static String preamble = """
+from nf_python import nextflow
+
+"""
+
+    private static Map prepareScript(String code, Map opts) {
+        if (!code) throw new IllegalArgumentException('Missing code argument')
+        if (!opts) opts = [:]
+        if (opts.containsKey('script')) {
+            throw new IllegalArgumentException('The "script" option is reserved for the script file path and cannot be used with inline code')
+        }
+        // Normalize indentation to avoid issues with Python indentation
+        code = normalize_indentation(code)
+        code = preamble + code
+        def scriptFile = File.createTempFile('nfpy_code', '.py')
+        scriptFile.deleteOnExit()
+        scriptFile.text = code
+
+        // Prepare options and arguments
+        def optsWithScript = opts + [script: scriptFile.absolutePath]
+        return optsWithScript
+    }
+
     @Operator
-    DataflowWriteChannel pyOperator(DataflowReadChannel source, Map opts) {
+    DataflowWriteChannel pyOperator(DataflowReadChannel source, Map opts, String code = "") {
+        assert !(code && opts.containsKey('script')) : 'Cannot use both code and script options together'
+        if (code)
+            opts = prepareScript(code, opts)
+
         final target = CH.createBy(source)
         final next = { args ->
             def unpacked = runPythonScript(opts, args instanceof Map ? args : [value: args])
@@ -71,9 +115,23 @@ class PythonExtension extends PluginExtensionPoint {
         return target
     }
 
+    @Operator
+    DataflowWriteChannel pyOperator(DataflowReadChannel source, String code = "") {
+        return pyOperator(source, [:], code)
+    }
+
     @Function
-    def pyFunction(Map opts) {
+    def pyFunction(Map opts, String code = "") {
+        assert !(code && opts.containsKey('script')) : 'Cannot use both code and script options together'
+        if (code)
+            opts = prepareScript(code, opts)
+
         return runPythonScript(opts)
+    }
+
+    @Function
+    def pyFunction(String code = "") {
+        return pyFunction([:], code)
     }
 
     // Helper: packGroovy serializes Groovy/Java types to the plugin protocol

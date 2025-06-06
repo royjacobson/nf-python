@@ -136,4 +136,33 @@ workflow {
             assert result.value == [82, 17, 49]
             println "[TEST] version roundtrip: $result"
         }
+
+    Channel.of([1])
+        .pyOperator("""
+        nextflow.output(arg1=123, arg2='abc')
+        """)
+        .view( result -> {
+            assert result.arg1 == 123
+            assert result.arg2 == 'abc'
+            println "[TEST] pyOperator with inline code returned: $result"
+        })
+
+    Channel.of([1])
+        .pyOperator("""
+        nextflow.output(arg1=123, arg2='abc', arg3=nextflow.opts['foo'])
+        """, foo: 1)
+        .view( result -> {
+            assert result.arg1 == 123
+            assert result.arg2 == 'abc'
+            assert result.arg3 == 1
+            println "[TEST] pyOperator with inline code returned: $result"
+        })
+
+    assert pyFunction("""
+        nextflow.output(arg1=123, arg2='abc')
+        """) == [arg1: 123, arg2: 'abc']
+
+    assert pyFunction("""
+        nextflow.output(arg1=123, arg2='abc', arg3=nextflow.opts['foo'])
+        """, foo: 1) == [arg1: 123, arg2: 'abc', arg3: 1]
 }
