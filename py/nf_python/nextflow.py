@@ -1,4 +1,3 @@
-# (Moved from plugins/nf-python/src/main/python/nextflow.py)
 # Python integration module for Nextflow plugin (nf-python).
 
 import os
