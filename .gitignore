@@ -7,3 +7,5 @@
 build
 work
 out
+
+py/*.egg-info/

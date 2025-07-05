@@ -113,14 +113,15 @@ def pack_python(python_object):
         ]
     elif isinstance(python_object, str):
         return ["String", python_object]
+    # Bool has to come before int because bool is a subclass of int!
+    elif isinstance(python_object, bool):
+        return ["Boolean", python_object]
     elif isinstance(python_object, int):
         return ["Integer", python_object]
     elif isinstance(python_object, decimal.Decimal):
         return ["Decimal", str(python_object)]
     elif isinstance(python_object, float):
         return ["Float", pack_float(python_object)]
-    elif isinstance(python_object, bool):
-        return ["Boolean", python_object]
     elif python_object is None:
         return ["Null", None]
     elif isinstance(python_object, pathlib.Path):

@@ -166,6 +166,20 @@ from nf_python import nf
         throw new IllegalArgumentException("Expected a list, got: $obj")
     }
 
+    private static Integer cInteger(Object obj) {
+        if (obj instanceof Integer) {
+            return obj
+        }
+        throw new IllegalArgumentException("Expected an integer, got: $obj")
+    }
+
+    private static Boolean cBoolean(Object obj) {
+        if (obj instanceof Boolean) {
+            return obj as Boolean
+        }
+        throw new IllegalArgumentException("Expected an boolean, got: $obj")
+    }
+
     private static def unpackPython(obj) {
         List objList = cList(obj)
         if (objList.size() != 2) {
@@ -186,15 +200,15 @@ from nf_python import nf
                     }
                 }
                 return result
-            case 'String': return data
-            case 'Integer': return data
-            case 'Decimal': return new BigDecimal(cString(data) as String)
+            case 'String': return cString(data)
+            case 'Integer': return cInteger(data)
+            case 'Decimal': return new BigDecimal(cString(data))
             case 'Float': return unpackFloat(data)
-            case 'Boolean': return data
+            case 'Boolean': return cBoolean(data)
             case 'Null': return null
             case 'Path': return java.nio.file.Paths.get(cString(data))
-            case 'Duration': return Duration.of(data as long)
-            case 'MemoryUnit': return new MemoryUnit(data as long)
+            case 'Duration': return Duration.of(cInteger(data))
+            case 'MemoryUnit': return new MemoryUnit(cInteger(data))
             case 'VersionNumber':
                 List dataList = cList(data)
                 if (dataList.size() == 3) {
