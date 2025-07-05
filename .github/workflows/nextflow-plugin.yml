@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      NF_PYTHON_VERSION: '0.1.1'
+      NF_PYTHON_VERSION: '0.1.2'
       NXF_OFFLINE: 'true'
     steps:
     - uses: actions/checkout@v4

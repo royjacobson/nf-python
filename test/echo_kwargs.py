@@ -1,11 +1,3 @@
-import nf_python
+from nf_python import nf
 
-args = nf_python.nextflow.args
-opts = nf_python.nextflow.opts
-
-output = {
-    **args,
-    **opts,
-}
-
-nf_python.nextflow.output(**output)
+nf.output(**nf.args)

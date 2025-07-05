@@ -3,14 +3,7 @@ package nextflow.python
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.transform.CompileStatic
-import groovyx.gpars.dataflow.DataflowReadChannel
-import groovyx.gpars.dataflow.DataflowWriteChannel
-import nextflow.Channel
-import nextflow.extension.CH
-import nextflow.extension.DataflowHelper
-import nextflow.plugin.extension.Factory
 import nextflow.plugin.extension.Function
-import nextflow.plugin.extension.Operator
 import nextflow.plugin.extension.PluginExtensionPoint
 import nextflow.Session
 import nextflow.util.MemoryUnit
@@ -19,6 +12,11 @@ import nextflow.util.Duration
 
 @CompileStatic
 class PythonExtension extends PluginExtensionPoint {
+
+    final private static String PYTHON_PREAMBLE = '''
+from nf_python import nf
+
+'''
     private Session session
 
     @Override
@@ -26,175 +24,184 @@ class PythonExtension extends PluginExtensionPoint {
         this.session = session
     }
 
-    // Shared logic for running a Python script
-    private static def runPythonScript(Map opts, def argsForChannel = null) {
-        def script = opts.script
-        if (!script) throw new IllegalArgumentException('Missing script argument')
-        def forwardedOpts = opts.findAll { k, v -> k != 'script' }
-        def inputMap = [
-            args: packGroovy(argsForChannel != null ? argsForChannel : [:]),
-            opts: packGroovy(forwardedOpts)
-        ]
-        def infile = File.createTempFile('nfpy_in', '.json')
-        infile.deleteOnExit()
-        infile.text = JsonOutput.toJson(inputMap)
-        def outfile = File.createTempFile('nfpy_out', '.json')
-        outfile.deleteOnExit()
+    @Function
+    Object pyFunction(Map args, String code = '') {
+        assert !(code && args.containsKey('script')) : 'Cannot use both code and script options together'
+        if (code) {
+            args = prepareScript(code, args)
+        }
 
-        def proc = ['python', script] as String[]
-        def env = [
-            'NEXTFLOW_INFILE': infile.absolutePath,
-            'NEXTFLOW_OUTFILE': outfile.absolutePath,
-            'NEXTFLOW_PYTHON_COMPAT_VER': '1',
-        ]
-        def pb = new ProcessBuilder(proc)
-        pb.environment().putAll(env)
-        pb.redirectErrorStream(true)
-        def process = pb.start()
-        process.inputStream.eachLine { println "[python] $it" }
-        int rc = process.waitFor()
-        if (rc != 0) throw new RuntimeException("Python script failed: $script")
-
-        def result = new JsonSlurper().parse(outfile)
-        return unpackPython(result)
+        return runPythonScript(args)
     }
 
-    private static String normalize_indentation(String code) {
-        def lines = code.split('\n')
-        def first_non_empty = lines.find { it.trim() }
+    @Function
+    Object pyFunction(String code = '') {
+        return pyFunction([:], code)
+    }
+
+    private static String normalizeIndentation(String code) {
+        String[] lines = code.split('\n')
+        String firstNonEmpty = lines.find { line -> line.trim() }
         // Get a string of spaces/tabs that represents the base indentation
-        def base_indentation = first_non_empty ? first_non_empty.takeWhile { it == ' ' || it == '\t' } : ''
+        String baseIndentation = firstNonEmpty ? firstNonEmpty.takeWhile { chr -> chr == ' ' || chr == '\t' } : ''
         // Remove the base indentation from all lines
-        def normalized_lines = lines.collect { line ->
-            if (line.startsWith(base_indentation)) {
-                return line.substring(base_indentation.length())
+        String[] normalizedLines = lines.collect { line ->
+            if (line.startsWith(baseIndentation)) {
+                return line.substring(baseIndentation.length())
             } else {
                 return line // No change if it doesn't start with base indentation
             }
         }
-        // Join the lines back together
-        return normalized_lines.join('\n')
+        return normalizedLines.join('\n')
     }
 
-    private static String preamble = """
-from nf_python import nextflow
-
-"""
-
-    private static Map prepareScript(String code, Map opts) {
-        if (!code) throw new IllegalArgumentException('Missing code argument')
-        if (!opts) opts = [:]
-        if (opts.containsKey('script')) {
+    private static Map prepareScript(String code, Map args) {
+        if (!code) {
+            throw new IllegalArgumentException('Missing code argument')
+        }
+        if (!args) {
+            args = [:]
+        }
+        if (args.containsKey('script')) {
             throw new IllegalArgumentException('The "script" option is reserved for the script file path and cannot be used with inline code')
         }
         // Normalize indentation to avoid issues with Python indentation
-        code = normalize_indentation(code)
-        code = preamble + code
-        def scriptFile = File.createTempFile('nfpy_code', '.py')
+        String script = PYTHON_PREAMBLE + normalizeIndentation(code)
+        File scriptFile = File.createTempFile('nfpy_code', '.py')
         scriptFile.deleteOnExit()
-        scriptFile.text = code
+        scriptFile.text = script
 
         // Prepare options and arguments
-        def optsWithScript = opts + [script: scriptFile.absolutePath]
-        return optsWithScript
+        Map argsWithScript = args + [script: scriptFile.absolutePath]
+        return argsWithScript
     }
 
-    @Operator
-    DataflowWriteChannel pyOperator(DataflowReadChannel source, Map opts, String code = "") {
-        assert !(code && opts.containsKey('script')) : 'Cannot use both code and script options together'
-        if (code)
-            opts = prepareScript(code, opts)
-
-        final target = CH.createBy(source)
-        final next = { args ->
-            def unpacked = runPythonScript(opts, args instanceof Map ? args : [value: args])
-            target.bind(unpacked)
+    private static Object runPythonScript(Map args) {
+        def script = args.script
+        if (!script) {
+            throw new IllegalArgumentException('Missing script argument')
         }
-        final done = { target.bind(Channel.STOP) }
-        DataflowHelper.subscribeImpl(source, [onNext: next, onComplete: done])
-        return target
+        Map forwardedArgs = args.findAll { k, v -> k != 'script' }
+        File infile = File.createTempFile('nfpy_in', '.json')
+        infile.deleteOnExit()
+        infile.text = JsonOutput.toJson(packGroovy(forwardedArgs))
+        File outfile = File.createTempFile('nfpy_out', '.json')
+        outfile.deleteOnExit()
+
+        String[] proc = ['python', script] as String[]
+        Map env = [
+            'NEXTFLOW_INFILE': infile.absolutePath,
+            'NEXTFLOW_OUTFILE': outfile.absolutePath,
+            'NEXTFLOW_PYTHON_COMPAT_VER': '1',
+        ]
+        ProcessBuilder pb = new ProcessBuilder(proc)
+        pb.environment().putAll(env)
+        pb.redirectErrorStream(true)
+        Process process = pb.start()
+        process.inputStream.eachLine { line -> println "[python] $line" }
+        int rc = process.waitFor()
+        if (rc != 0) {
+            throw new nextflow.exception.ProcessException("Python script failed with exit code $rc: $script")
+        }
+
+        Object result = new JsonSlurper().parse(outfile)
+        return unpackPython(result)
     }
 
-    @Operator
-    DataflowWriteChannel pyOperator(DataflowReadChannel source, String code = "") {
-        return pyOperator(source, [:], code)
+    private static def packFloat(Double value) {
+        if (value.isInfinite()) {
+            return value > 0 ? 'inf' : '-inf'
+        }
+        if (value.isNaN()) {
+            return 'nan'
+        }
+        return value
     }
 
-    @Function
-    def pyFunction(Map opts, String code = "") {
-        assert !(code && opts.containsKey('script')) : 'Cannot use both code and script options together'
-        if (code)
-            opts = prepareScript(code, opts)
-
-        return runPythonScript(opts)
-    }
-
-    @Function
-    def pyFunction(String code = "") {
-        return pyFunction([:], code)
-    }
-
-    // Helper: packGroovy serializes Groovy/Java types to the plugin protocol
-    static def packGroovy(obj) {
-        if (obj == null) return ["Null", null]
-        if (obj instanceof List) return ["List", obj.collect { packGroovy(it) }]
-        if (obj instanceof Set) return ["Set", obj.collect { packGroovy(it) }]
-        if (obj instanceof Map) return ["Map", obj.collect { k, v -> [packGroovy(k), packGroovy(v)] }.toList()]
-        if (obj instanceof String) return ["String", obj]
-        if (obj instanceof Integer) return ["Integer", obj]
-        if (obj instanceof Long) return ["Integer", obj]
-        if (obj instanceof BigDecimal) return ["Decimal", obj]
-        if (obj instanceof Double || obj instanceof Float) return ["Float", obj]
-        if (obj instanceof Boolean) return ["Boolean", obj]
-        if (obj instanceof java.nio.file.Path) return ["Path", obj.toString()]
-        if (obj instanceof Duration) return ["Duration", obj.toMillis()]
-        if (obj instanceof java.time.Duration) return ["Duration", obj.toMillis()]
-        if (obj instanceof MemoryUnit) return ["MemoryUnit", obj.toBytes()]
-        if (obj instanceof VersionNumber) return ["VersionNumber", [obj.getMajor(), obj.getMinor(), obj.getPatch()]]
-        // Add more as needed
+    private static List packGroovy(obj) {
+        if (obj == null) return ['Null', null]
+        if (obj instanceof List) return ['List', obj.collect { packGroovy(it) }]
+        if (obj instanceof Set) return ['Set', obj.collect { packGroovy(it) }]
+        if (obj instanceof Map) return ['Map', obj.collect { k, v -> [packGroovy(k), packGroovy(v)] }.toList()]
+        if (obj instanceof String) return ['String', obj]
+        if (obj instanceof Integer) return ['Integer', obj]
+        if (obj instanceof Long) return ['Integer', obj]
+        if (obj instanceof BigDecimal) return ['Decimal', obj]
+        if (obj instanceof Double || obj instanceof Float) return ['Float', packFloat(obj.doubleValue())]
+        if (obj instanceof Boolean) return ['Boolean', obj]
+        if (obj instanceof java.nio.file.Path) return ['Path', obj.toString()]
+        if (obj instanceof Duration) return ['Duration', obj.toMillis()]
+        if (obj instanceof java.time.Duration) return ['Duration', obj.toMillis()]
+        if (obj instanceof MemoryUnit) return ['MemoryUnit', obj.toBytes()]
+        if (obj instanceof VersionNumber) return ['VersionNumber', [obj.getMajor(), obj.getMinor(), obj.getPatch()]]
         throw new IllegalArgumentException("Cannot serialize type: ${obj?.getClass()}")
     }
-    // Helper: unpackPython deserializes plugin protocol to Groovy/Java types
-    static def unpackPython(obj) {
-        if (!(obj instanceof List)) return obj
-        List objList = (List)obj
-        if (objList.size() != 2) return obj
+
+    private static def unpackFloat(obj) {
+        if (obj instanceof String) {
+            switch (obj) {
+                case 'inf': return Double.POSITIVE_INFINITY
+                case '-inf': return Double.NEGATIVE_INFINITY
+                case 'nan': return Double.NaN
+                default: throw new IllegalArgumentException("Expected a number for special string for Float, got: $obj")
+            }
+        } else if (obj instanceof Number) {
+            return obj
+        } else {
+            throw new IllegalArgumentException('Expected a string or number for unpacking float')
+        }
+    }
+
+    private static String cString(Object obj) {
+        if (obj instanceof String) {
+            return obj
+        } 
+        throw new IllegalArgumentException("Expected a string, got: $obj")
+    }
+
+    private static List cList(Object obj) {
+        if (obj instanceof List) {
+            return obj
+        }
+        throw new IllegalArgumentException("Expected a list, got: $obj")
+    }
+
+    private static def unpackPython(obj) {
+        List objList = cList(obj)
+        if (objList.size() != 2) {
+            throw new IllegalArgumentException("Expected a list of size 2 for unpacking, got: $obj")
+        }
         def type = objList.get(0)
         def data = objList.get(1)
         switch(type) {
-            case 'List': return data instanceof List ? data.collect { unpackPython(it) } : []
-            case 'Set': return data instanceof List ? (data.collect { unpackPython(it) } as Set) : [] as Set
+            case 'List': return cList(data).collect { unpackPython(it) }
+            case 'Set': return cList(data).collect { unpackPython(it) } as Set
             case 'Map':
-                if (data instanceof List) {
-                    def result = [:]
-                    for (def entry : data) {
-                        if (entry instanceof List && entry.size() == 2) {
-                            result[unpackPython(entry[0])] = unpackPython(entry[1])
-                        }
+                def result = [:]
+                for (def entry : cList(data)) {
+                    if (entry instanceof List && entry.size() == 2) {
+                        result[unpackPython(entry[0])] = unpackPython(entry[1])
+                    } else {
+                        throw new IllegalArgumentException("Expected a list of key-value pairs for Map, got: $entry")
                     }
-                    return result
-                } else {
-                    return [:]
                 }
+                return result
             case 'String': return data
             case 'Integer': return data
-            case 'Decimal': return data instanceof String ? new BigDecimal(data as String) : null
-            case 'Float': return data
+            case 'Decimal': return new BigDecimal(cString(data) as String)
+            case 'Float': return unpackFloat(data)
             case 'Boolean': return data
             case 'Null': return null
-            case 'Path': return data instanceof String ? java.nio.file.Paths.get(data) : null
-            case 'Duration': return data != null ? Duration.of(data as long) : null
-            case 'MemoryUnit':
-                return data != null ? new MemoryUnit(data as long) : null
+            case 'Path': return java.nio.file.Paths.get(cString(data))
+            case 'Duration': return Duration.of(data as long)
+            case 'MemoryUnit': return new MemoryUnit(data as long)
             case 'VersionNumber':
-                if (data instanceof List && data.size() == 3) {
-                    // Compose a string like 'major.minor.patch' for the constructor
-                    def verStr = "${data[0]}.${data[1]}.${data[2]}"
+                List dataList = cList(data)
+                if (dataList.size() == 3) {
+                    String verStr = "${dataList[0]}.${dataList[1]}.${dataList[2]}"
                     return new VersionNumber(verStr)
-                } else {
-                    return null
                 }
-            // Add more as needed
+                throw new IllegalArgumentException("Expected a list of 3 elements for VersionNumber, got: $data")
             default: throw new IllegalArgumentException("Unknown type from Python: $type")
         }
     }
