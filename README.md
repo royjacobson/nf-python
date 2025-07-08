@@ -2,23 +2,14 @@
 
 nf-python is a Nextflow plugin enabling seamless integration between Nextflow and Python scripts. Python scripts can be invoked as part of your Nextflow workflow, and arguments and outputs will be serialized back-and-forth automatically, making them available as native pythonic objects.
 
----
-
 ## Installation
-⚠️ nf-python is not yet available in the Nextflow plugin repository, so manual compilation and the usage of NXF_OFFLINE are required.
-
-⚠️ On the python side, you'll need to install the nf-python package (available through pypi).
-
-If you still want to experiment with this plugin, this is the way to do it right now:
+`nf-python` does not handle python environment setup itself. `python` needs to be in the system path and have the pypi package `nf-python-plugin` installed:
 ```bash
-git clone git@github.com:royjacobson/nf-python.git && cd nf-python
-pip install py/
-make buildPlugins
-cp -r build/plugins/nf-python-0.1.2 ~/.nextflow/plugins/
-export NXF_OFFLINE=true
-
-nextflow my_flow.nf -plugins 'nf-python@0.1.2'
+pip install nf-python-plugin
 ```
+🚨 Please note: installing `nf-python-plugin` through the built-in conda support is not working yet.
+
+Then, to use the plugin in your Nextflow data pipelines, simply include it by writing `include { pyFunction } from 'plugin/nf-python'` and it will be downloaded and installed. For all setup options, please refer to the [Nextflow plugins documentation](https://www.nextflow.io/docs/latest/plugins.html).
 
 ## Example Usage
 To use a python script as part of your Nextflow pipeline, import `pyFunction` from the `nf-python` plugin:
@@ -67,6 +58,21 @@ assert result == [arg1: 123, arg2: 'abc', arg3: 1]
 ## Contributing
 
 Contributions and feedback are welcome! This project is in a preliminary exploration stage and lots of possible functionality remains to be added.
+
+## Install from source
+
+If you want to build and run this plugin from source, you can use this method:
+
+```bash
+git clone git@github.com:royjacobson/nf-python.git && cd nf-python
+pip install py/  # Install in the appropriate python environment
+make buildPlugins
+export VER="0.1.2"  # Change appropriately
+cp -r build/plugins/nf-python-${VER} ~/.nextflow/plugins/
+
+export NXF_OFFLINE=true
+nextflow my_flow.nf -plugins "nf-python@${VER}"
+```
 
 ## License
 
