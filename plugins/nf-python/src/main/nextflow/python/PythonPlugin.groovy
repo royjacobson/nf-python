@@ -10,5 +10,6 @@ class PythonPlugin extends BasePlugin {
 
     PythonPlugin(PluginWrapper wrapper) {
         super(wrapper)
+        PythonExtension.setPluginDir(getWrapper().getPluginPath())
     }
 }

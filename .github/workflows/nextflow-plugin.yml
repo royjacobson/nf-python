@@ -10,7 +10,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      NF_PYTHON_VERSION: '0.1.2'
       NXF_OFFLINE: 'true'
     steps:
     - uses: actions/checkout@v4
@@ -28,17 +27,24 @@ jobs:
         wget -qO- https://get.nextflow.io | bash
         sudo mv nextflow /usr/local/bin/
         nextflow -version
-    - name: Build Python package
+    - name: Test versions
       run: |
-        pip install --upgrade pip
-        pip install ./py
+        # Get plugin version from plugins/nf-python/src/resources/META-INF/MANIFEST.MF
+        PLUGIN_VERSION=$(grep 'Plugin-Version' plugins/nf-python/src/resources/META-INF/MANIFEST.MF | cut -d' ' -f2)
+        # Get python package version from py/pyproject.toml
+        PYTHON_VERSION=$(grep 'version =' py/pyproject.toml | cut -d'=' -f2 | tr -d ' "')
+        if [ "$PLUGIN_VERSION" != "$PYTHON_VERSION" ]; then
+          echo "Plugin version mismatch: $PYTHON_VERSION, $PLUGIN_VERSION"
+          exit 1
+        fi
+        echo "PLUGIN_VERSION=$PLUGIN_VERSION" >> $GITHUB_ENV
     - name: Build Nextflow plugin
       run: make buildPlugins
     - name: Move plugin to ~/.nextflow/plugins
       run: |
         mkdir -p ~/.nextflow/plugins
-        cp -r build/plugins/nf-python-${{ env.NF_PYTHON_VERSION }} ~/.nextflow/plugins/
+        cp -r build/plugins/nf-python-${{ env.PLUGIN_VERSION }} ~/.nextflow/plugins/
     - name: Run Nextflow workflow test
       run: |
         cd test
-        nextflow run test_flow.nf -plugins "nf-python@${{ env.NF_PYTHON_VERSION }}"
+        nextflow run test_flow.nf -plugins "nf-python@${{ env.PLUGIN_VERSION }}"
