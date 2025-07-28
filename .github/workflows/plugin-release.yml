@@ -58,12 +58,6 @@ jobs:
           name: nf-python-plugin
           path: |
             build/plugins/nf-python-*.zip
-      - name: Archive plugin artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: nf-python-plugin-metadata
-          path: |
-            build/libs/nf-python-*-meta.json
 
   release:
     needs: build-plugin
@@ -77,11 +71,6 @@ jobs:
         with:
           name: nf-python-plugin
           path: build/plugins/
-      - name: Download plugin artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: nf-python-plugin-metadata
-          path: build/libs/
       - name: Get release info
         id: get_release
         uses: actions/github-script@v7
@@ -105,11 +94,6 @@ jobs:
           filename=$(basename $file)
           echo "file=$file" >> $GITHUB_OUTPUT
           echo "filename=$filename" >> $GITHUB_OUTPUT
-
-          metafile=$(ls build/libs/nf-python-*-meta.json | head -n1)
-          metafilename=$(basename $metafile)
-          echo "metafile=$metafile" >> $GITHUB_OUTPUT
-          echo "metafilename=$metafilename" >> $GITHUB_OUTPUT
       - name: Upload plugin zip to release
         uses: actions/upload-release-asset@v1
         env:
@@ -119,12 +103,3 @@ jobs:
           asset_path: ${{ steps.find_zip.outputs.file }}
           asset_name: ${{ steps.find_zip.outputs.filename }}
           asset_content_type: application/zip
-      - name: Upload plugin zip to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_path: ${{ steps.find_zip.outputs.metafile }}
-          asset_name: ${{ steps.find_zip.outputs.metafilename }}
-          asset_content_type: application/json
