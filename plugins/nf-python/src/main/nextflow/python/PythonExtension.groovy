@@ -130,7 +130,7 @@ from nf_python import nf
 
         executable = this.executable
         if (args.containsKey('_executable') || args.containsKey('_conda_env')) {
-            executable = getExecutableFromConfigVals(args._executable, args._conda_env)
+            executable = getExecutableFromConfigVals(args._executable ?: '', args._conda_env ?: '')
         }
 
         File infile = File.createTempFile('nfpy_in', '.json')
