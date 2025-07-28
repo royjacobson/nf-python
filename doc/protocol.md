@@ -8,7 +8,6 @@ The protocol is described here:
 
 - `NEXTFLOW_INFILE`: Path to a temporary JSON file containing serialized input arguments
 - `NEXTFLOW_OUTFILE`: Path to a temporary JSON file where serialized output are written by the Python code
-- `NEXTFLOW_PYTHON_COMPAT_VER`: Protocol compatibility version (currently "1")
 
 ## JSON Type System
 
