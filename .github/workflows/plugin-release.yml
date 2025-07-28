@@ -52,11 +52,13 @@ jobs:
       - name: Build Nextflow plugin
         run: |
           make buildPlugins
-      - name: Archive plugin zip
+      - name: Archive plugin artifacts
         uses: actions/upload-artifact@v4
         with:
           name: nf-python-plugin
-          path: build/plugins/nf-python-*.zip
+          path: |
+            build/plugins/nf-python-*.zip
+            build/libs/nf-python-*-meta.json
 
   release:
     needs: build-plugin
