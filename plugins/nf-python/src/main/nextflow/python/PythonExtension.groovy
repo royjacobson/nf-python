@@ -9,6 +9,9 @@ import nextflow.Session
 import nextflow.util.MemoryUnit
 import nextflow.util.VersionNumber
 import nextflow.util.Duration
+import java.nio.file.Path
+import nextflow.conda.CondaCache
+import nextflow.conda.CondaConfig
 
 @CompileStatic
 class PythonExtension extends PluginExtensionPoint {
@@ -18,10 +21,51 @@ from nf_python import nf
 
 '''
     private Session session
+    private String executable
+
+    private static Path pluginDir
+
+    static void setPluginDir(Path path) {
+        pluginDir = path
+    }
+
+    private String getPythonExecutable(String condaEnv) {
+        CondaCache cache = new CondaCache(session.getCondaConfig())
+        java.nio.file.Path condaPath = cache.getCachePathFor(condaEnv)
+
+        Process proc = new ProcessBuilder('conda', 'run', '-p', condaPath.toString(), 'which', 'python')
+            .redirectErrorStream(true)
+            .start()
+        def output = proc.inputStream.text.trim()
+        if (proc.waitFor() == 0 && output) {
+            return output
+        } else {
+            throw new IllegalStateException("Failed to find Python executable in conda environment: $condaEnv\n Output: ${output}")
+        }
+    }
 
     @Override
     void init(Session session) {
         this.session = session
+        this.executable = getExecutableFromConfigVals(
+            session.config.navigate('nf_python.executable') ?: '',
+            session.config.navigate('nf_python.conda_env') ?: ''
+        )
+    }
+
+    String getExecutableFromConfigVals(_executable, _condaEnv) {
+        String executable = cString(_executable)
+        String condaEnv = cString(_condaEnv)
+        if (executable && condaEnv) {
+            throw new IllegalArgumentException("The 'executable' and 'conda_env' options cannot be used together")
+        }
+        if (executable) {
+            return executable
+        }
+        if (condaEnv) {
+            return getPythonExecutable(condaEnv)
+        }
+        return 'python'
     }
 
     @Function
@@ -76,32 +120,42 @@ from nf_python import nf
         return argsWithScript
     }
 
-    private static Object runPythonScript(Map args) {
+    private Object runPythonScript(Map args) {
         def script = args.script
         if (!script) {
             throw new IllegalArgumentException('Missing script argument')
         }
-        Map forwardedArgs = args.findAll { k, v -> k != 'script' }
+        def excludedKeys = ['script', '_executable', '_conda_env']
+        Map forwardedArgs = args.findAll { k, v -> !(k in excludedKeys) }
+
+        executable = this.executable
+        if (args.containsKey('_executable') || args.containsKey('_conda_env')) {
+            executable = getExecutableFromConfigVals(args._executable, args._conda_env)
+        }
+
         File infile = File.createTempFile('nfpy_in', '.json')
         infile.deleteOnExit()
         infile.text = JsonOutput.toJson(packGroovy(forwardedArgs))
         File outfile = File.createTempFile('nfpy_out', '.json')
         outfile.deleteOnExit()
 
-        String[] proc = ['python', script] as String[]
+        String[] proc = [executable, script] as String[]
         Map env = [
             'NEXTFLOW_INFILE': infile.absolutePath,
             'NEXTFLOW_OUTFILE': outfile.absolutePath,
-            'NEXTFLOW_PYTHON_COMPAT_VER': '1',
+            'PYTHONPATH': System.getenv('PYTHONPATH') ?
+                System.getenv('PYTHONPATH') + File.pathSeparator + pluginDir.toString() :
+                pluginDir.toString()
         ]
         ProcessBuilder pb = new ProcessBuilder(proc)
+
         pb.environment().putAll(env)
         pb.redirectErrorStream(true)
         Process process = pb.start()
         process.inputStream.eachLine { line -> println "[python] $line" }
         int rc = process.waitFor()
         if (rc != 0) {
-            throw new nextflow.exception.ProcessException("Python script failed with exit code $rc: $script")
+            throw new nextflow.exception.ProcessEvalException("Python script evaluation failed", proc.join(' '), '', rc)
         }
 
         Object result = new JsonSlurper().parse(outfile)

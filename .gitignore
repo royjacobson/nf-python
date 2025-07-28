@@ -9,3 +9,5 @@ work
 out
 
 py/*.egg-info/
+
+plugins/nf-python/bin

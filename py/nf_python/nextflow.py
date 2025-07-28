@@ -46,7 +46,6 @@ class VersionNumber:
         raise NotImplementedError()
 
 
-NEXTFLOW_PYTHON_COMPAT_VER = "1"
 VALID_FLOAT_TEXTS = ("nan", "inf", "-inf")
 
 
@@ -142,11 +141,6 @@ def pack_python(python_object):
 class Nextflow:
     def __init__(self):
         self._written_output = False
-        if os.environ.get("NEXTFLOW_PYTHON_COMPAT_VER") != NEXTFLOW_PYTHON_COMPAT_VER:
-            raise RuntimeError(
-                "Incompatible NEXTFLOW_PYTHON_COMPAT_VER. Expected '1', got "
-                f"{os.environ.get('NEXTFLOW_PYTHON_COMPAT_VER')}"
-            )
         self._infile = os.environ.get("NEXTFLOW_INFILE")
         self._outfile = os.environ.get("NEXTFLOW_OUTFILE")
         if not self._infile or not self._outfile:

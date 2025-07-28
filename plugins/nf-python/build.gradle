@@ -81,3 +81,23 @@ test {
     useJUnitPlatform()
 }
 
+task buildPython(type: Exec) {
+    workingDir '../../py'
+    commandLine 'python', '-m', 'build', '--wheel', '--outdir', "${buildDir}"
+}
+
+task packagePython(type: Copy) {
+    dependsOn buildPython
+    def manifestFile = file('src/resources/META-INF/MANIFEST.MF')
+    def props = new Properties()
+    manifestFile.withInputStream { props.load(it) }
+    def pluginVersion = props['Plugin-Version']
+
+    from(zipTree("${buildDir}/nf_python_plugin-${pluginVersion}-py3-none-any.whl"))
+    into("${buildDir}/python-pkg")
+}
+
+tasks.named('makeZip', Jar) {
+    dependsOn packagePython
+    from("${buildDir}/python-pkg")
+}

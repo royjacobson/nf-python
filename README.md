@@ -3,13 +3,28 @@
 nf-python is a Nextflow plugin enabling seamless integration between Nextflow and Python scripts. Python scripts can be invoked as part of your Nextflow workflow, and arguments and outputs will be serialized back-and-forth automatically, making them available as native pythonic objects.
 
 ## Installation
-`nf-python` does not handle python environment setup itself. `python` needs to be in the system path and have the pypi package `nf-python-plugin` installed:
-```bash
-pip install nf-python-plugin
-```
-🚨 Please note: installing `nf-python-plugin` through the built-in conda support is not working yet.
+To use the plugin in your Nextflow data pipelines, simply include it by writing `include { pyFunction } from 'plugin/nf-python'` and it will be downloaded and installed. For all setup options, please refer to the [Nextflow plugins documentation](https://www.nextflow.io/docs/latest/plugins.html).
 
-Then, to use the plugin in your Nextflow data pipelines, simply include it by writing `include { pyFunction } from 'plugin/nf-python'` and it will be downloaded and installed. For all setup options, please refer to the [Nextflow plugins documentation](https://www.nextflow.io/docs/latest/plugins.html).
+`nf-python` requires a working python installation in the execution environment. By default, the `python` in path will be used.
+It is also possible to specify a path to a specific python executable or a conda environment. Either in the configuration file:
+```
+nf_python {
+  // Option 1
+  executable = '/usr/bin/python'
+  // Option 2
+  conda_env = ''
+}
+```
+The supported values for the `conda_env` option are the same ones supported by [Nextflow's native conda](https://www.nextflow.io/docs/latest/conda.html) support, and is using the same configuration options. Here are a few options:
+1. A list of required packages (e.g. `conda_env = 'numpy biopython'`)
+2. A conda configuration file (e.g. `conda_env = '/opt/task-env.yml'`)
+3. A path to an existing conda environment (e.g. `conda_env = '/home/user/.conda/envs/my-env'`)
+
+It is also possible to specify different environments on a per-function basis:
+```
+pyFunction(script: "", x: 1, y: 2, _executable: "/usr/bin/python")
+pyFunction(script: "", x: 1, y: 2, _conda_env: "matplotlib")
+```
 
 ## Example Usage
 To use a python script as part of your Nextflow pipeline, import `pyFunction` from the `nf-python` plugin:
@@ -65,9 +80,8 @@ If you want to build and run this plugin from source, you can use this method:
 
 ```bash
 git clone git@github.com:royjacobson/nf-python.git && cd nf-python
-pip install py/  # Install in the appropriate python environment
 make buildPlugins
-export VER="0.1.2"  # Change appropriately
+export VER="0.1.3"  # Change appropriately
 cp -r build/plugins/nf-python-${VER} ~/.nextflow/plugins/
 
 export NXF_OFFLINE=true
