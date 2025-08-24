@@ -1,17 +1,44 @@
 package nextflow.python
 
+import com.google.common.hash.Hasher
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.transform.CompileStatic
+import java.nio.file.Path
+import java.nio.file.Paths
+import nextflow.conda.CondaCache
 import nextflow.plugin.extension.Function
 import nextflow.plugin.extension.PluginExtensionPoint
 import nextflow.Session
+import nextflow.util.CacheHelper
+import nextflow.util.Duration
 import nextflow.util.MemoryUnit
 import nextflow.util.VersionNumber
-import nextflow.util.Duration
-import java.nio.file.Path
-import nextflow.conda.CondaCache
-import nextflow.conda.CondaConfig
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+
+@CompileStatic
+class PythonExecSession {
+
+    final Path infile
+    final Path outfile
+    final Path stdout
+    final Path stderr
+    final Path script
+
+    PythonExecSession(Path path, String scriptPath = null) {
+        infile = path.resolve('in.json')
+        outfile = path.resolve('out.json')
+        stdout = path.resolve('stdout.log')
+        stderr = path.resolve('stderr.log')
+        if (scriptPath) {
+            script = Paths.get(scriptPath)
+        } else {
+            script = path.resolve('script.py')
+        }
+    }
+
+}
 
 @CompileStatic
 class PythonExtension extends PluginExtensionPoint {
@@ -20,28 +47,14 @@ class PythonExtension extends PluginExtensionPoint {
 from nf_python import nf
 
 '''
+    static final Logger log = LoggerFactory.getLogger(PythonExtension)
+    private static Path pluginDir
+
     private Session session
     private String executable
 
-    private static Path pluginDir
-
     static void setPluginDir(Path path) {
         pluginDir = path
-    }
-
-    private String getPythonExecutable(String condaEnv) {
-        CondaCache cache = new CondaCache(session.getCondaConfig())
-        java.nio.file.Path condaPath = cache.getCachePathFor(condaEnv)
-
-        Process proc = new ProcessBuilder('conda', 'run', '-p', condaPath.toString(), 'which', 'python')
-            .redirectErrorStream(true)
-            .start()
-        def output = proc.inputStream.text.trim()
-        if (proc.waitFor() == 0 && output) {
-            return output
-        } else {
-            throw new IllegalStateException("Failed to find Python executable in conda environment: $condaEnv\n Output: ${output}")
-        }
     }
 
     @Override
@@ -69,18 +82,85 @@ from nf_python import nf
     }
 
     @Function
-    Object pyFunction(Map args, String code = '') {
-        assert !(code && args.containsKey('script')) : 'Cannot use both code and script options together'
-        if (code) {
-            args = prepareScript(code, args)
-        }
-
-        return runPythonScript(args)
+    Object pyFunction(String code = '') {
+        return pyFunction([:], code)
     }
 
     @Function
-    Object pyFunction(String code = '') {
-        return pyFunction([:], code)
+    Object pyFunction(Map args, String code = '') {
+        assert !(code && args.containsKey('script')) : 'Cannot use both code and script options together'
+
+        List<String> excludedKeys = ['script', '_executable', '_conda_env']
+        Map forwardedArgs = args.findAll { k, v -> !(k in excludedKeys) }
+
+        String executable = this.executable
+        if (args.containsKey('_executable') || args.containsKey('_conda_env')) {
+            executable = getExecutableFromConfigVals(args._executable ?: '', args._conda_env ?: '')
+        }
+
+        // Pack args once and JSON-serialize once
+        List packedArgs = packGroovy(forwardedArgs)
+        String serializedArgs = JsonOutput.toJson(packedArgs)
+        log.trace('Serialized args: {}', serializedArgs)
+
+        String hash = directoryHash(
+            executable,
+            args.containsKey('script') ? new File(args.script as String).text : code,
+            serializedArgs
+        )
+        File executionDir = workDirForHash(hash)
+        if (executionDir.exists()) {
+            log.debug "Found old job directory ${executionDir}, removing."
+            executionDir.deleteDir()
+        }
+        executionDir.mkdirs()
+        PythonExecSession execDir = new PythonExecSession(
+            executionDir.toPath(),
+            args.containsKey('script') ? args.script as String : ''
+        )
+        log.debug "Starting python execution (hash: ${hash}) in: ${executionDir.absolutePath}"
+
+        if (!args.containsKey('script')) {
+            prepareScript(code, execDir.script)
+        }
+
+        execDir.infile.text = serializedArgs
+
+        String[] proc = [executable, execDir.script] as String[]
+        Map env = [
+            'NEXTFLOW_INFILE': execDir.infile.toAbsolutePath().toString(),
+            'NEXTFLOW_OUTFILE': execDir.outfile.toAbsolutePath().toString(),
+            'PYTHONPATH': System.getenv('PYTHONPATH') ?
+                System.getenv('PYTHONPATH') + File.pathSeparator + pluginDir.toString() :
+                pluginDir.toString()
+        ]
+
+        ProcessBuilder pb = new ProcessBuilder(proc)
+        pb.redirectOutput(execDir.stdout.toFile())
+        pb.redirectError(execDir.stderr.toFile())
+        pb.environment().putAll(env)
+
+        Process process = pb.start()
+        int rc = process.waitFor()
+        if (rc != 0) {
+            reportError(process, proc, execDir, "Python script evaluation failed")
+        }
+
+        if (execDir.outfile.exists()) {
+            log.trace('Python output content: {}', execDir.outfile.toFile().text)
+        } else {
+            reportError(process, proc, execDir, "Python script did not produce expected output file.")
+        }
+        Object result = new JsonSlurper().parse(execDir.outfile.toFile())
+        return unpackPython(result)
+    }
+
+    private static String directoryHash(String executable, String code, String serializedArgs) {
+        Hasher hasher = CacheHelper.hasher(executable)
+        hasher.putString(executable, java.nio.charset.StandardCharsets.UTF_8)
+        hasher.putString(code, java.nio.charset.StandardCharsets.UTF_8)
+        hasher.putString(serializedArgs, java.nio.charset.StandardCharsets.UTF_8)
+        return hasher.hash()
     }
 
     private static String normalizeIndentation(String code) {
@@ -99,67 +179,30 @@ from nf_python import nf
         return normalizedLines.join('\n')
     }
 
-    private static Map prepareScript(String code, Map args) {
+    private static void prepareScript(String code, Path scriptPath) {
         if (!code) {
             throw new IllegalArgumentException('Missing code argument')
         }
-        if (!args) {
-            args = [:]
-        }
-        if (args.containsKey('script')) {
-            throw new IllegalArgumentException('The "script" option is reserved for the script file path and cannot be used with inline code')
-        }
         // Normalize indentation to avoid issues with Python indentation
         String script = PYTHON_PREAMBLE + normalizeIndentation(code)
-        File scriptFile = File.createTempFile('nfpy_code', '.py')
-        scriptFile.deleteOnExit()
+        File scriptFile = scriptPath.toFile()
+        log.debug "Writing python code to a temporary file: ${scriptFile.absolutePath}"
         scriptFile.text = script
-
-        // Prepare options and arguments
-        Map argsWithScript = args + [script: scriptFile.absolutePath]
-        return argsWithScript
     }
 
-    private Object runPythonScript(Map args) {
-        def script = args.script
-        if (!script) {
-            throw new IllegalArgumentException('Missing script argument')
-        }
-        def excludedKeys = ['script', '_executable', '_conda_env']
-        Map forwardedArgs = args.findAll { k, v -> !(k in excludedKeys) }
-
-        executable = this.executable
-        if (args.containsKey('_executable') || args.containsKey('_conda_env')) {
-            executable = getExecutableFromConfigVals(args._executable ?: '', args._conda_env ?: '')
-        }
-
-        File infile = File.createTempFile('nfpy_in', '.json')
-        infile.deleteOnExit()
-        infile.text = JsonOutput.toJson(packGroovy(forwardedArgs))
-        File outfile = File.createTempFile('nfpy_out', '.json')
-        outfile.deleteOnExit()
-
-        String[] proc = [executable, script] as String[]
-        Map env = [
-            'NEXTFLOW_INFILE': infile.absolutePath,
-            'NEXTFLOW_OUTFILE': outfile.absolutePath,
-            'PYTHONPATH': System.getenv('PYTHONPATH') ?
-                System.getenv('PYTHONPATH') + File.pathSeparator + pluginDir.toString() :
-                pluginDir.toString()
-        ]
-        ProcessBuilder pb = new ProcessBuilder(proc)
-
-        pb.environment().putAll(env)
-        pb.redirectErrorStream(true)
-        Process process = pb.start()
-        process.inputStream.eachLine { line -> println "[python] $line" }
-        int rc = process.waitFor()
-        if (rc != 0) {
-            throw new nextflow.exception.ProcessEvalException("Python script evaluation failed", proc.join(' '), '', rc)
-        }
-
-        Object result = new JsonSlurper().parse(outfile)
-        return unpackPython(result)
+    private static void reportError(Process process, String[] command, PythonExecSession execDir, String errMsg) {
+        String stderrContent = execDir.stderr.toFile().text
+        String[] stderrLines = stderrContent.split('\n')
+        String firstLines = stderrLines.take(10).join('\n')
+        String lastLines = stderrLines.takeRight(10).join('\n')
+        log.error(errMsg + "\n" +
+                    "Command: ${command.join(' ')} exited with exit code ${process.exitValue()}\n" +
+                    "First 10 lines of stderr:\n$firstLines\n" +
+                    "Last 10 lines of stderr:\n$lastLines\n" +
+                    "Check the log files in:\n" + 
+                    "\t'${execDir.stdout.toAbsolutePath()}'\n" +
+                    "\t'${execDir.stderr.toAbsolutePath()}'")
+        throw new nextflow.exception.ProcessEvalException(errMsg, command.join(' '), '', process.exitValue())
     }
 
     private static def packFloat(Double value) {
@@ -273,4 +316,32 @@ from nf_python import nf
             default: throw new IllegalArgumentException("Unknown type from Python: $type")
         }
     }
+
+    private String getPythonExecutable(String condaEnv) {
+        CondaCache cache = new CondaCache(session.getCondaConfig())
+
+        log.debug "Looking for conda env '$condaEnv' in conda cache"
+        java.nio.file.Path condaPath = cache.getCachePathFor(condaEnv)
+        log.debug "Conda environment found in '$condaPath'"
+
+        // We can't just use "$condaPath/bin/python" because conda may not have python installed.
+        // TODO: Should we cache this?
+        Process proc = new ProcessBuilder('conda', 'run', '-p', condaPath.toString(), 'which', 'python')
+            .redirectErrorStream(true)
+            .start()
+        def output = proc.inputStream.text.trim()
+        if (!proc.waitFor() == 0 || !output) {
+            throw new IllegalStateException("Failed to find Python executable in conda environment: $condaEnv\n Output: $output")
+        }
+
+        log.debug "Found Python executable in conda environment: $output"
+        return output
+    }
+
+    private File workDirForHash(String hash) {
+        def root = session.getWorkDir().resolve('.nf-python')
+        def path = root.resolve(hash.substring(0, 2)).resolve(hash.substring(2))
+        return path.toFile()
+    }
+
 }
