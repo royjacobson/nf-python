@@ -172,10 +172,10 @@ class Nextflow:
             raise ValueError("Cant pass both unnamed outputs and named outputs!")
         if args:
             with open(self._outfile, "w") as f:
-                json.dump(pack_python(args), f, default=str)
+                json.dump(pack_python(args), f, separators=(',', ':'))
         elif kwargs:
             with open(self._outfile, "w") as f:
-                json.dump(pack_python(kwargs), f, default=str)
+                json.dump(pack_python(kwargs), f, separators=(',', ':'))
         self._written_output = True
 
 
