@@ -1,0 +1,37 @@
+// Plugins
+plugins {
+    id 'io.nextflow.nextflow-plugin' version '1.0.0-beta.6'
+}
+
+// Plugin version
+version = '0.1.4'
+
+nextflowPlugin {
+    // Minimum Nextflow version
+    nextflowVersion = '24.04.0'
+
+    // Plugin metadata
+    provider = 'Roy Jacobson'
+    className = 'nextflow.python.PythonPlugin'
+    extensionPoints = [
+        'nextflow.python.PythonExtension'
+    ]
+}
+
+buildDir = project.layout.buildDirectory
+
+task buildPython(type: Exec) {
+    workingDir 'py'
+    commandLine 'python', '-m', 'build', '--wheel', '--outdir', "${buildDir}"
+}
+
+task packagePython(type: Copy) {
+    dependsOn buildPython
+    from(zipTree("${buildDir}/nf_python_plugin-${version}-py3-none-any.whl"))
+    into("${buildDir}/python-pkg")
+}
+
+project.tasks.named('packagePlugin', Zip) {
+    dependsOn packagePython
+    from("${buildDir}/python-pkg")
+}

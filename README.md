@@ -80,12 +80,9 @@ If you want to build and run this plugin from source, you can use this method:
 
 ```bash
 git clone git@github.com:royjacobson/nf-python.git && cd nf-python
-make buildPlugins
-export VER="0.1.4"  # Change appropriately
-cp -r build/plugins/nf-python-${VER} ~/.nextflow/plugins/
-
+make install
 export NXF_OFFLINE=true
-nextflow my_flow.nf -plugins "nf-python@${VER}"
+nextflow my_flow.nf -plugins "nf-python@0.1.4"  # Change appropriately
 ```
 
 ## License
