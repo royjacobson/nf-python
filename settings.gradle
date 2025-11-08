@@ -22,5 +22,3 @@ plugins {
 }
 
 rootProject.name = 'nf-python'
-include('plugins')
-include('plugins:nf-python')

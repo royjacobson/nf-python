@@ -36,21 +36,21 @@ jobs:
         pip install build
     - name: Test versions
       run: |
-        # Get plugin version from plugins/nf-python/src/resources/META-INF/MANIFEST.MF
-        PLUGIN_VERSION=$(grep 'Plugin-Version' plugins/nf-python/src/resources/META-INF/MANIFEST.MF | cut -d' ' -f2)
+        # Get plugin version from build.gradle
+        PLUGIN_VERSION=$(grep '^version =' build.gradle | cut -d'=' -f2 | tr -d " '")
         # Get python package version from py/pyproject.toml
         PYTHON_VERSION=$(grep 'version =' py/pyproject.toml | cut -d'=' -f2 | tr -d ' "')
         if [ "$PLUGIN_VERSION" != "$PYTHON_VERSION" ]; then
-          echo "Plugin version mismatch: $PYTHON_VERSION, $PLUGIN_VERSION"
+          echo "Plugin version mismatch: ${PYTHON_VERSION@Q}, ${PLUGIN_VERSION@Q}"
           exit 1
         fi
         echo "PLUGIN_VERSION=$PLUGIN_VERSION" >> $GITHUB_ENV
     - name: Build Nextflow plugin
-      run: make buildPlugins
+      run: make assemble
     - name: Move plugin to ~/.nextflow/plugins
       run: |
         mkdir -p ~/.nextflow/plugins
-        cp -r build/plugins/nf-python-${{ env.PLUGIN_VERSION }} ~/.nextflow/plugins/
+        unzip build/distributions/nf-python-${{ env.PLUGIN_VERSION }}.zip -d ~/.nextflow/plugins/nf-python-${{ env.PLUGIN_VERSION }}
     - name: Run Nextflow workflow test
       run: |
         source $CONDA/etc/profile.d/conda.sh
