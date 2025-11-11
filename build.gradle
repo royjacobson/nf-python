@@ -8,7 +8,7 @@ version = '0.1.4'
 
 nextflowPlugin {
     // Minimum Nextflow version
-    nextflowVersion = '24.04.0'
+    nextflowVersion = '23.04.0'
 
     // Plugin metadata
     provider = 'Roy Jacobson'
