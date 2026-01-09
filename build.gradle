@@ -1,6 +1,6 @@
 // Plugins
 plugins {
-    id 'io.nextflow.nextflow-plugin' version '1.0.0-beta.6'
+    id 'io.nextflow.nextflow-plugin' version '1.0.0-beta.14'
 }
 
 // Plugin version
